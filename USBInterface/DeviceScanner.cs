@@ -4,9 +4,20 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Diagnostics;
 
-namespace USBInterface
+namespace HIDAPIInterface
 {
+    public class DeviceEventArgs : EventArgs
+    {
+        public DeviceEventArgs(byte[] data)
+        {
+            Data = data;
+        }
+
+        public byte[] Data { get; private set; }
+    }
+
     public class DeviceScanner
     { 
         public event EventHandler DeviceArrived;
@@ -24,7 +35,7 @@ namespace USBInterface
 
         private volatile bool deviceConnected = false;
 
-        private int scanIntervalMillisecs = 10;
+        private int scanIntervalMillisecs = 500;
         public int ScanIntervalInMillisecs
         {
             get { lock (syncLock) { return scanIntervalMillisecs; } }
@@ -36,23 +47,37 @@ namespace USBInterface
             get { return asyncScanOn; }
         }
 
+        public ushort VendorId { get => vendorId; set => vendorId = value; }
+        public ushort ProductId { get => productId; set => productId = value; }
+
         private ushort vendorId;
         private ushort productId;
 
         // Use this class to monitor when your devices connects.
         // Note that scanning for device when it is open by another process will return FALSE
         // even though the device is connected (because the device is unavailiable)
-        public DeviceScanner(ushort VendorID, ushort ProductID, int scanIntervalMillisecs = 100)
+        public DeviceScanner(ushort VendorID, ushort ProductID, int scanIntervalMillisecs = 500 )
         {
             vendorId = VendorID;
             productId = ProductID;
             ScanIntervalInMillisecs = scanIntervalMillisecs;
         }
 
-        // scanning for device when it is open by another process will return false
-        public static bool ScanOnce(ushort vid, ushort pid)
+        public bool ScanOnce()
         {
-            return HidApi.hid_enumerate(vid, pid) != IntPtr.Zero;
+            return ScanOnce(vendorId, productId);
+        }
+
+        // scanning for device when it is open by another process will return false
+        public bool ScanOnce(ushort vid, ushort pid)
+        {
+            IntPtr device_info = HidApi.hid_enumerate(vid, pid);
+            bool device_on_bus = device_info != IntPtr.Zero;
+            // freeing the enumeration releases the device, 
+            // do it as soon as you can, so we dont block device from others
+            HidApi.hid_free_enumeration(device_info);
+            deviceConnected = device_on_bus;
+            return device_on_bus;
         }
 
         public void StartAsyncScan()
@@ -65,6 +90,7 @@ namespace USBInterface
             }
             asyncScanOn = true;
             scannerThread = new Thread(ScanLoop);
+            scannerThread.IsBackground = true;
             scannerThread.Name = "HidApiAsyncDeviceScanThread";
             scannerThread.Start();
         }
@@ -72,6 +98,47 @@ namespace USBInterface
         public void StopAsyncScan()
         {
             asyncScanOn = false;
+            if (scannerThread != null)
+            {
+                scannerThread.Join(200);
+                if (scannerThread.IsAlive)
+                    scannerThread.Abort();
+            }
+        }
+
+        public bool WaitScan(int timeoutms= 5000, int intervallms=500)
+        {
+            Stopwatch timeoutWatch = new Stopwatch();
+            timeoutWatch.Start();
+
+            if (timeoutms < intervallms)
+                timeoutms = 3 * intervallms;
+            bool device_on_bus = false;
+            while (true)
+            {
+                if (timeoutWatch.ElapsedMilliseconds > timeoutms)
+                {
+                    timeoutWatch.Stop();
+                    break;
+                }
+                try
+                {
+                    device_on_bus = ScanOnce(vendorId, productId);
+                    if (device_on_bus)
+                    {
+                        // just found new device
+                        break;
+                    }
+                }
+                catch (Exception e)
+                {
+                    // stop scan, user can manually restart again with StartAsyncScan()
+                    Console.WriteLine(e.ToString());
+                }
+
+                Thread.Sleep(intervallms);
+            }
+            return deviceConnected;
         }
 
         private void ScanLoop()
@@ -82,39 +149,47 @@ namespace USBInterface
 
             // The read has a timeout parameter, so every X milliseconds
             // we check if the user wants us to continue scanning.
+            bool deviceWasConnected = false;
             while (asyncScanOn)
             {
                 try
                 {
-                    IntPtr device_info = HidApi.hid_enumerate(vendorId, productId);
-                    bool device_on_bus = device_info != IntPtr.Zero;
-                    // freeing the enumeration releases the device, 
-                    // do it as soon as you can, so we dont block device from others
-                    HidApi.hid_free_enumeration(device_info);
-                    if (device_on_bus && ! deviceConnected)
+                    //IntPtr device_info = HidApi.hid_enumerate(vendorId, productId);
+                    //bool device_on_bus = device_info != IntPtr.Zero;
+                    //// freeing the enumeration releases the device, 
+                    //// do it as soon as you can, so we dont block device from others
+                    //HidApi.hid_free_enumeration(device_info);
+                    
+                    bool device_on_bus = ScanOnce(vendorId, productId);
+                    if (device_on_bus && !deviceWasConnected)
                     {
                         // just found new device
                         deviceConnected = true;
                         if (DeviceArrived != null)
                         {
+                            Console.WriteLine("Scanner: Device VID=0x{0:X4} PID=0x{1:X4} arrived!", vendorId, productId);
                             DeviceArrived(this, EventArgs.Empty);
                         }
                     }
-                    if (! device_on_bus && deviceConnected)
+                    if (!device_on_bus && deviceWasConnected)
                     {
                         // just lost device connection
                         deviceConnected = false;
                         if (DeviceRemoved != null)
                         {
+                            Console.WriteLine("Scanner: Device VID 0x{0:X4} PID 0x{1:X4} removed!",vendorId,productId);
                             DeviceRemoved(this, EventArgs.Empty);
                         }
                     }
+                    deviceWasConnected = deviceConnected;
                 }
                 catch (Exception e)
                 {
                     // stop scan, user can manually restart again with StartAsyncScan()
+                    Console.WriteLine(e.ToString());
                     asyncScanOn = false;
                 }
+
                 // when read 0 bytes, sleep and read again
                 Thread.Sleep(ScanIntervalInMillisecs);
             }

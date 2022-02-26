@@ -4,8 +4,9 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace USBInterface
+namespace HIDAPIInterface
 {
+
     internal class HidApi
     {
         #region Native Methods
@@ -16,6 +17,7 @@ namespace USBInterface
         // find the library on all platforms becasue of different
         // naming conventions.
         // Just use hidapi and expect users to supply it in same folder as .exe
+        //public const string DLL_FILE_NAME = "libhidapi-0";
         public const string DLL_FILE_NAME = "hidapi";
 
         /// Return Type: int
@@ -144,6 +146,27 @@ namespace USBInterface
         [DllImport(DLL_FILE_NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Auto)]
         public static extern IntPtr hid_error(IntPtr device);
 
+        /// Return Type: int
+        ///device: hid_device*
+        [DllImport(DLL_FILE_NAME, CallingConvention = CallingConvention.Cdecl)]
+        public  static extern int hid_get_input_buf(IntPtr device);
+
+        /// Return Type: int
+        ///device: hid_device*
+        ///num: unsigned int 
+        [DllImport(DLL_FILE_NAME, CallingConvention = CallingConvention.Cdecl)]
+        public static extern  int hid_set_input_buf(IntPtr device,uint num);
+
+        /// Return Type: int
+        ///device: hid_device*
+        [DllImport(DLL_FILE_NAME, CallingConvention = CallingConvention.Cdecl)]
+        public static extern int hid_flush_input(IntPtr device);
+
+        /// Return Type: DWORD
+        ///device: hid_device*
+        ///HID_API_EXPORT DWORD HID_API_CALL  hid_error_num(hid_device *dev);
+        [DllImport(DLL_FILE_NAME, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Auto)]
+        public static extern ulong hid_error_num(IntPtr device);
 
 
         #endregion

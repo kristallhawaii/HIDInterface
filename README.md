@@ -1,4 +1,13 @@
+# HIDInterface - Fork Changes
+
+- added function for set/get input buffer
+- added hid_error_num
+- some other modifications I doen't remember :)
+
+
 # HIDInterface
+Forked from : https://github.com/temach/HIDInterface
+
 C# Wrapper of HIDAPI from signal11, wrapper multiplatform, used for interfaction with generic HID Devices, USB or bluetooth
 
 This is a fork of a project that appeared to be abandoned by its creator.
